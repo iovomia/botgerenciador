@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import Dict, List, Optional, Any
 import requests
 from config import BACKUP_FILE, REPORTS_DIR
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 # Configurar logging
 logging.basicConfig(
@@ -161,6 +162,99 @@ class MessageSender:
                 'error': str(e),
                 'timestamp': datetime.now().isoformat()
             }
+    
+    @staticmethod
+    def send_template_message(api_key: str, chat_id: str, template: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Envia mensagem usando template (com foto, texto e botões)
+        """
+        try:
+            # Se há foto, usar sendPhoto
+            if template.get('photo'):
+                url = f"https://api.telegram.org/bot{api_key}/sendPhoto"
+                
+                payload = {
+                    'chat_id': chat_id,
+                    'photo': template['photo'],
+                    'caption': template.get('text', ''),
+                    'parse_mode': 'HTML'
+                }
+                
+                # Adicionar botões se existirem
+                if template.get('buttons'):
+                    keyboard = []
+                    for button in template['buttons']:
+                        keyboard.append([{
+                            'text': button['text'],
+                            'url': button['url']
+                        }])
+                    
+                    payload['reply_markup'] = {
+                        'inline_keyboard': keyboard
+                    }
+                
+                response = requests.post(url, json=payload, timeout=30)
+            
+            else:
+                # Apenas texto e botões
+                url = f"https://api.telegram.org/bot{api_key}/sendMessage"
+                
+                payload = {
+                    'chat_id': chat_id,
+                    'text': template.get('text', 'Mensagem sem texto'),
+                    'parse_mode': 'HTML'
+                }
+                
+                # Adicionar botões se existirem
+                if template.get('buttons'):
+                    keyboard = []
+                    for button in template['buttons']:
+                        keyboard.append([{
+                            'text': button['text'],
+                            'url': button['url']
+                        }])
+                    
+                    payload['reply_markup'] = {
+                        'inline_keyboard': keyboard
+                    }
+                
+                response = requests.post(url, json=payload, timeout=30)
+            
+            # Processar resposta
+            if response.status_code == 200:
+                result = response.json()
+                if result.get('ok'):
+                    return {
+                        'success': True,
+                        'message_id': result.get('result', {}).get('message_id'),
+                        'timestamp': datetime.now().isoformat()
+                    }
+                else:
+                    return {
+                        'success': False,
+                        'error': result.get('description', 'Erro desconhecido'),
+                        'error_code': result.get('error_code'),
+                        'timestamp': datetime.now().isoformat()
+                    }
+            else:
+                return {
+                    'success': False,
+                    'error': f'HTTP {response.status_code}: {response.text}',
+                    'timestamp': datetime.now().isoformat()
+                }
+                
+        except requests.exceptions.Timeout:
+            return {
+                'success': False,
+                'error': 'Timeout na requisição',
+                'timestamp': datetime.now().isoformat()
+            }
+        except Exception as e:
+            return {
+                'success': False,
+                'error': str(e),
+                'timestamp': datetime.now().isoformat()
+            }
 
 class ReportGenerator:
     """Gera relatórios de envio"""
@@ -257,3 +351,219 @@ def sanitize_filename(filename: str) -> str:
     """Remove caracteres inválidos do nome do arquivo"""
     import re
     return re.sub(r'[<>:"/\\|?*]', '_', filename)
+
+
+class MessageTemplate:
+    """Classe para gerenciar templates de mensagens"""
+    
+    TEMPLATES_FILE = 'message_templates.json'
+    
+    @staticmethod
+    def load_templates() -> Dict[str, Any]:
+        """Carrega templates salvos"""
+        try:
+            if os.path.exists(MessageTemplate.TEMPLATES_FILE):
+                with open(MessageTemplate.TEMPLATES_FILE, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            return {}
+        except Exception as e:
+            logger.error(f"Erro ao carregar templates: {e}")
+            return {}
+    
+    @staticmethod
+    def save_templates(templates: Dict[str, Any]) -> bool:
+        """Salva templates"""
+        try:
+            with open(MessageTemplate.TEMPLATES_FILE, 'w', encoding='utf-8') as f:
+                json.dump(templates, f, ensure_ascii=False, indent=2)
+            logger.info("Templates salvos com sucesso")
+            return True
+        except Exception as e:
+            logger.error(f"Erro ao salvar templates: {e}")
+            return False
+    
+    @staticmethod
+    def create_template(name: str, template_data: Dict[str, Any]) -> bool:
+        """Cria novo template"""
+        templates = MessageTemplate.load_templates()
+        templates[name] = {
+            'text': template_data.get('text', ''),
+            'photo': template_data.get('photo', ''),
+            'buttons': template_data.get('buttons', []),
+            'created_at': datetime.now().isoformat(),
+            'updated_at': datetime.now().isoformat()
+        }
+        return MessageTemplate.save_templates(templates)
+    
+    @staticmethod
+    def update_template(name: str, template_data: Dict[str, Any]) -> bool:
+        """Atualiza template existente"""
+        templates = MessageTemplate.load_templates()
+        if name in templates:
+            templates[name].update({
+                'text': template_data.get('text', templates[name].get('text', '')),
+                'photo': template_data.get('photo', templates[name].get('photo', '')),
+                'buttons': template_data.get('buttons', templates[name].get('buttons', [])),
+                'updated_at': datetime.now().isoformat()
+            })
+            return MessageTemplate.save_templates(templates)
+        return False
+    
+    @staticmethod
+    def delete_template(name: str) -> bool:
+        """Remove template"""
+        templates = MessageTemplate.load_templates()
+        if name in templates:
+            del templates[name]
+            return MessageTemplate.save_templates(templates)
+        return False
+    
+    @staticmethod
+    def get_template(name: str) -> Optional[Dict[str, Any]]:
+        """Obtém template específico"""
+        templates = MessageTemplate.load_templates()
+        return templates.get(name)
+    
+    @staticmethod
+    def list_templates() -> List[str]:
+        """Lista nomes dos templates"""
+        templates = MessageTemplate.load_templates()
+        return list(templates.keys())
+
+
+class MessageBuilder:
+    """Classe para construir mensagens interativamente"""
+    
+    @staticmethod
+    def create_template_keyboard() -> InlineKeyboardMarkup:
+        """Cria teclado para seleção de templates"""
+        templates = MessageTemplate.list_templates()
+        keyboard = []
+        
+        # Templates existentes
+        for template in templates:
+            keyboard.append([
+                InlineKeyboardButton(f"📝 {template}", callback_data=f"select_template_{template}"),
+                InlineKeyboardButton("✏️", callback_data=f"edit_template_{template}"),
+                InlineKeyboardButton("🗑️", callback_data=f"delete_template_{template}")
+            ])
+        
+        # Opções principais
+        keyboard.extend([
+            [InlineKeyboardButton("➕ Criar Nova Mensagem", callback_data="create_new_template")],
+            [InlineKeyboardButton("⏪ Voltar", callback_data="back_to_main")]
+        ])
+        
+        return InlineKeyboardMarkup(keyboard)
+    
+    @staticmethod
+    def create_edit_keyboard(template_name: str = None) -> InlineKeyboardMarkup:
+        """Cria teclado para edição de mensagem"""
+        prefix = f"edit_{template_name}_" if template_name else "new_"
+        
+        keyboard = [
+            [InlineKeyboardButton("📝 Editar Texto", callback_data=f"{prefix}text")],
+            [InlineKeyboardButton("🖼️ Adicionar Foto", callback_data=f"{prefix}photo")],
+            [InlineKeyboardButton("🔘 Adicionar Botões", callback_data=f"{prefix}buttons")],
+            [
+                InlineKeyboardButton("👁️ Visualizar", callback_data=f"{prefix}preview"),
+                InlineKeyboardButton("💾 Salvar", callback_data=f"{prefix}save")
+            ],
+            [InlineKeyboardButton("⏪ Voltar", callback_data="back_to_templates")]
+        ]
+        
+        return InlineKeyboardMarkup(keyboard)
+    
+    @staticmethod
+    def create_button_edit_keyboard(template_name: str = None) -> InlineKeyboardMarkup:
+        """Cria teclado para edição de botões"""
+        prefix = f"edit_{template_name}_" if template_name else "new_"
+        
+        keyboard = [
+            [InlineKeyboardButton("➕ Adicionar Botão", callback_data=f"{prefix}add_button")],
+            [InlineKeyboardButton("📋 Ver Botões", callback_data=f"{prefix}list_buttons")],
+            [InlineKeyboardButton("🗑️ Limpar Botões", callback_data=f"{prefix}clear_buttons")],
+            [InlineKeyboardButton("⏪ Voltar", callback_data=f"{prefix}back")]
+        ]
+        
+        return InlineKeyboardMarkup(keyboard)
+
+
+class LoopManager:
+    """Classe para gerenciar envios em loop infinito"""
+    
+    LOOP_CONFIG_FILE = 'loop_config.json'
+    
+    @staticmethod
+    def save_loop_config(user_id: str, config: Dict[str, Any]) -> bool:
+        """Salva configuração de loop"""
+        try:
+            loop_configs = LoopManager.load_all_configs()
+            loop_configs[user_id] = {
+                'enabled': config.get('enabled', False),
+                'interval_minutes': config.get('interval_minutes', 60),
+                'messages_per_cycle': config.get('messages_per_cycle', 10),
+                'template_name': config.get('template_name', ''),
+                'restart_when_finished': config.get('restart_when_finished', True),
+                'created_at': datetime.now().isoformat(),
+                'updated_at': datetime.now().isoformat()
+            }
+            
+            with open(LoopManager.LOOP_CONFIG_FILE, 'w', encoding='utf-8') as f:
+                json.dump(loop_configs, f, ensure_ascii=False, indent=2)
+            
+            logger.info(f"Configuração de loop salva para usuário {user_id}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Erro ao salvar configuração de loop: {e}")
+            return False
+    
+    @staticmethod
+    def load_loop_config(user_id: str) -> Optional[Dict[str, Any]]:
+        """Carrega configuração de loop do usuário"""
+        try:
+            configs = LoopManager.load_all_configs()
+            return configs.get(user_id)
+        except Exception as e:
+            logger.error(f"Erro ao carregar configuração de loop: {e}")
+            return None
+    
+    @staticmethod
+    def load_all_configs() -> Dict[str, Any]:
+        """Carrega todas as configurações de loop"""
+        try:
+            if os.path.exists(LoopManager.LOOP_CONFIG_FILE):
+                with open(LoopManager.LOOP_CONFIG_FILE, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            return {}
+        except Exception as e:
+            logger.error(f"Erro ao carregar configurações de loop: {e}")
+            return {}
+    
+    @staticmethod
+    def is_loop_enabled(user_id: str) -> bool:
+        """Verifica se loop está habilitado para usuário"""
+        config = LoopManager.load_loop_config(user_id)
+        return config.get('enabled', False) if config else False
+    
+    @staticmethod
+    def disable_loop(user_id: str) -> bool:
+        """Desabilita loop para usuário"""
+        config = LoopManager.load_loop_config(user_id) or {}
+        config['enabled'] = False
+        config['updated_at'] = datetime.now().isoformat()
+        return LoopManager.save_loop_config(user_id, config)
+    
+    @staticmethod
+    def create_loop_keyboard() -> InlineKeyboardMarkup:
+        """Cria teclado para configuração de loop"""
+        keyboard = [
+            [InlineKeyboardButton("🔄 Ativar Loop Infinito", callback_data="enable_loop")],
+            [InlineKeyboardButton("⏹️ Desativar Loop", callback_data="disable_loop")],
+            [InlineKeyboardButton("⚙️ Configurar Intervalo", callback_data="config_loop_interval")],
+            [InlineKeyboardButton("📊 Status do Loop", callback_data="loop_status")],
+            [InlineKeyboardButton("⏪ Voltar", callback_data="back_to_main")]
+        ]
+        
+        return InlineKeyboardMarkup(keyboard)

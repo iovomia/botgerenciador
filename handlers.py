@@ -11,7 +11,8 @@ from config import SYSTEM_PASSWORD, MAX_LOGIN_ATTEMPTS
 from translations import get_text, detect_language
 from utils import (
     BackupManager, SpreadsheetProcessor, MessageSender, 
-    ReportGenerator, UserSession, validate_number
+    ReportGenerator, UserSession, validate_number,
+    MessageTemplate, MessageBuilder, LoopManager
 )
 
 logger = logging.getLogger(__name__)
@@ -94,6 +95,14 @@ class BotHandlers:
             await BotHandlers._handle_interval(update, context, session, lang)
         elif state == 'awaiting_batch_size':
             await BotHandlers._handle_batch_size(update, context, session, lang)
+        elif state == 'editing_template_text':
+            await BotHandlers._handle_template_text_input(update, context, session, lang)
+        elif state == 'editing_template_buttons':
+            await BotHandlers._handle_template_button_input(update, context, session, lang)
+        elif state == 'saving_template':
+            await BotHandlers._handle_template_name_input(update, context, session, lang)
+        elif state == 'configuring_loop_interval':
+            await BotHandlers._handle_loop_interval_input(update, context, session, lang)
         else:
             # Estado não reconhecido, voltar ao início
             await BotHandlers._show_login(update, context, lang)
@@ -146,8 +155,17 @@ class BotHandlers:
             await update.message.reply_text(text, reply_markup=reply_markup)
         else:
             text = get_text('upload_prompt', lang)
-            await update.message.reply_text(text)
-            user_sessions.update_session(user_id, {'state': 'awaiting_file'})
+            
+            # Adicionar botões para gerenciar mensagens e loop
+            keyboard = [
+                [InlineKeyboardButton("📝 Gerenciar Mensagens", callback_data='manage_templates')],
+                [InlineKeyboardButton("🔄 Configurar Loop", callback_data='manage_loop')],
+                [InlineKeyboardButton("📥 Enviar Planilha", callback_data='upload_file')]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            await update.message.reply_text(text, reply_markup=reply_markup)
+            user_sessions.update_session(user_id, {'state': 'main_menu'})
     
     @staticmethod
     async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -187,8 +205,14 @@ class BotHandlers:
                 text = get_text('upload_success', lang)
                 await update.message.reply_text(text)
                 
-                # Mostrar configuração
-                await BotHandlers._show_config_interval(update, context, lang)
+                # Verificar se há templates disponíveis
+                templates = MessageTemplate.list_templates()
+                if templates:
+                    # Mostrar seleção de template
+                    await BotHandlers._show_template_selection(update, context, lang)
+                else:
+                    # Ir direto para configuração
+                    await BotHandlers._show_config_interval(update, context, lang)
             else:
                 text = get_text('error_invalid_format', lang)
                 await update.message.reply_text(text)
@@ -199,12 +223,20 @@ class BotHandlers:
             await update.message.reply_text(text)
     
     @staticmethod
-    async def _show_config_interval(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str):
+    async def _show_config_interval(update_or_query, context: ContextTypes.DEFAULT_TYPE, lang: str):
         """Mostra configuração de intervalo"""
         text = get_text('config_interval', lang)
-        await update.message.reply_text(text)
         
-        user_id = str(update.effective_user.id)
+        # Verificar se é update ou query
+        if hasattr(update_or_query, 'message') and update_or_query.message:
+            # É um Update
+            await update_or_query.message.reply_text(text)
+            user_id = str(update_or_query.effective_user.id)
+        else:
+            # É um CallbackQuery
+            await update_or_query.message.reply_text(text)
+            user_id = str(update_or_query.from_user.id)
+        
         user_sessions.update_session(user_id, {'state': 'awaiting_interval'})
     
     @staticmethod
@@ -302,6 +334,43 @@ class BotHandlers:
             await BotHandlers._cancel_sending(query, context, lang)
         elif data == 'back_to_menu':
             await BotHandlers._show_upload_prompt(query, context, lang)
+        elif data == 'upload_file':
+            user_sessions.update_session(user_id, {'state': 'awaiting_file'})
+            await query.edit_message_text(get_text('upload_prompt', lang))
+        elif data == 'manage_templates':
+            await BotHandlers._show_template_menu(query, context, lang)
+        elif data == 'manage_loop':
+            await BotHandlers._show_loop_menu(query, context, lang)
+        elif data == 'create_new_template':
+            await BotHandlers._handle_template_creation(query, context)
+        elif data.startswith('select_template_'):
+            template_name = data.replace('select_template_', '')
+            await BotHandlers._handle_template_selection(query, context, template_name)
+        elif data == 'no_template':
+            await BotHandlers._handle_no_template_selection(query, context)
+        elif data.startswith('edit_template_'):
+            template_name = data.replace('edit_template_', '')
+            # TODO: Implementar edição de template existente
+            await query.edit_message_text(f"Editando template: {template_name}")
+        elif data.startswith('delete_template_'):
+            template_name = data.replace('delete_template_', '')
+            if MessageTemplate.delete_template(template_name):
+                text = get_text('template_deleted', lang, name=template_name)
+                await query.edit_message_text(text)
+                await asyncio.sleep(2)
+                await BotHandlers._show_template_menu(query, context, lang)
+        elif data.startswith('new_') or data.startswith('edit_'):
+            await BotHandlers._handle_template_edit_actions(query, context, data)
+        elif data == 'back_to_templates':
+            await BotHandlers._show_template_menu(query, context, lang)
+        elif data == 'enable_loop':
+            await BotHandlers._handle_loop_enable(query, context)
+        elif data == 'disable_loop':
+            await BotHandlers._handle_loop_disable(query, context)
+        elif data == 'config_loop_interval':
+            await BotHandlers._handle_loop_interval_config(query, context)
+        elif data == 'loop_status':
+            await BotHandlers._handle_loop_status(query, context)
         elif data.startswith('lang_'):
             # Mudança de idioma
             new_lang = data.replace('lang_', '')
@@ -340,10 +409,14 @@ class BotHandlers:
         user_id = str(query.from_user.id)
         session = user_sessions.get_session(user_id)
         
+        # Salvar mensagens originais para loop infinito
+        messages_queue = session.get('messages_queue', [])
+        
         user_sessions.update_session(user_id, {
             'sending_active': True,
             'sending_paused': False,
-            'state': 'sending'
+            'state': 'sending',
+            'original_messages': messages_queue.copy()  # Para loop infinito
         })
         
         # Salvar backup inicial
@@ -399,12 +472,31 @@ class BotHandlers:
                 
                 message_data = messages_queue.pop(0)
                 
-                # Enviar mensagem
-                result = MessageSender.send_message(
-                    message_data['api_key'],
-                    message_data['chat_id'],
-                    message_data['mensagem']
-                )
+                # Verificar se há template selecionado
+                selected_template = session.get('selected_template')
+                if selected_template:
+                    template = MessageTemplate.get_template(selected_template)
+                    if template:
+                        # Usar template ao invés da mensagem da planilha
+                        result = MessageSender.send_template_message(
+                            message_data['api_key'],
+                            message_data['chat_id'],
+                            template
+                        )
+                    else:
+                        # Fallback para mensagem normal
+                        result = MessageSender.send_message(
+                            message_data['api_key'],
+                            message_data['chat_id'],
+                            message_data['mensagem']
+                        )
+                else:
+                    # Enviar mensagem normal
+                    result = MessageSender.send_message(
+                        message_data['api_key'],
+                        message_data['chat_id'],
+                        message_data['mensagem']
+                    )
                 
                 # Atualizar status
                 if result['success']:
@@ -447,6 +539,29 @@ class BotHandlers:
             
             # Verificar se ainda há mensagens
             if not messages_queue:
+                # Verificar se loop infinito está ativo
+                loop_config = LoopManager.load_loop_config(user_id)
+                if loop_config and loop_config.get('enabled', False):
+                    # Reiniciar fila com mensagens originais
+                    original_messages = session.get('original_messages', [])
+                    if original_messages:
+                        user_sessions.update_session(user_id, {
+                            'messages_queue': original_messages.copy()
+                        })
+                        
+                        # Notificar reinício do loop
+                        text = get_text('loop_restarting', lang)
+                        try:
+                            await context.bot.send_message(user_id, text)
+                        except:
+                            pass
+                        
+                        # Aguardar intervalo do loop antes de reiniciar
+                        loop_interval = loop_config.get('interval_minutes', 60)
+                        await asyncio.sleep(loop_interval * 60)
+                        continue
+                
+                # Finalizar envio normal
                 await BotHandlers._finish_sending(context, user_id, lang)
                 break
             
@@ -547,3 +662,450 @@ class BotHandlers:
         
         # Voltar ao menu
         await BotHandlers._show_upload_prompt(query, context, lang)
+    
+    # ==================== SISTEMA DE TEMPLATES ====================
+    
+    @staticmethod
+    async def _show_template_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str):
+        """Mostra menu de gerenciamento de templates"""
+        text = get_text('template_menu', lang)
+        keyboard = MessageBuilder.create_template_keyboard()
+        
+        if hasattr(update, 'message') and update.message:
+            await update.message.reply_text(text, reply_markup=keyboard, parse_mode='Markdown')
+        else:
+            await update.edit_message_text(text, reply_markup=keyboard, parse_mode='Markdown')
+    
+    @staticmethod
+    async def _handle_template_selection(query, context: ContextTypes.DEFAULT_TYPE, template_name: str):
+        """Seleciona template para uso"""
+        user_id = str(query.from_user.id)
+        session = user_sessions.get_session(user_id)
+        lang = session.get('language', 'pt-BR')
+        
+        template = MessageTemplate.get_template(template_name)
+        if template:
+            user_sessions.update_session(user_id, {'selected_template': template_name})
+            text = get_text('template_selected', lang, name=template_name)
+            await query.edit_message_text(text)
+            
+            # Voltar ao menu principal
+            await asyncio.sleep(2)
+            await BotHandlers._show_upload_prompt(query, context, lang)
+        else:
+            text = get_text('error_general', lang)
+            await query.edit_message_text(text)
+    
+    @staticmethod
+    async def _handle_template_creation(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Inicia criação de novo template"""
+        user_id = str(update.effective_user.id)
+        session = user_sessions.get_session(user_id)
+        lang = session.get('language', 'pt-BR')
+        
+        # Inicializar template temporário
+        user_sessions.update_session(user_id, {
+            'state': 'creating_template',
+            'temp_template': {'text': '', 'photo': '', 'buttons': []}
+        })
+        
+        text = get_text('create_template', lang)
+        keyboard = MessageBuilder.create_edit_keyboard()
+        
+        if hasattr(update, 'message') and update.message:
+            await update.message.reply_text(text, reply_markup=keyboard, parse_mode='Markdown')
+        else:
+            await update.edit_message_text(text, reply_markup=keyboard, parse_mode='Markdown')
+    
+    @staticmethod
+    async def _handle_template_text_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Solicita edição do texto do template"""
+        user_id = str(update.effective_user.id)
+        session = user_sessions.get_session(user_id)
+        lang = session.get('language', 'pt-BR')
+        
+        user_sessions.update_session(user_id, {'state': 'editing_template_text'})
+        
+        text = get_text('template_text_prompt', lang)
+        await update.edit_message_text(text, parse_mode='Markdown')
+    
+    @staticmethod
+    async def _handle_template_photo_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Solicita edição da foto do template"""
+        user_id = str(update.effective_user.id)
+        session = user_sessions.get_session(user_id)
+        lang = session.get('language', 'pt-BR')
+        
+        user_sessions.update_session(user_id, {'state': 'editing_template_photo'})
+        
+        text = get_text('template_photo_prompt', lang)
+        await update.edit_message_text(text, parse_mode='Markdown')
+    
+    @staticmethod
+    async def _handle_template_button_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Solicita edição dos botões do template"""
+        user_id = str(update.effective_user.id)
+        session = user_sessions.get_session(user_id)
+        lang = session.get('language', 'pt-BR')
+        
+        user_sessions.update_session(user_id, {'state': 'editing_template_buttons'})
+        
+        text = get_text('template_button_prompt', lang)
+        await update.edit_message_text(text, parse_mode='Markdown')
+    
+    @staticmethod
+    async def _handle_template_save(update: Update, context: ContextTypes.DEFAULT_TYPE, template_name: str = None):
+        """Salva template"""
+        user_id = str(update.effective_user.id)
+        session = user_sessions.get_session(user_id)
+        lang = session.get('language', 'pt-BR')
+        
+        if not template_name:
+            user_sessions.update_session(user_id, {'state': 'saving_template'})
+            text = get_text('template_name_prompt', lang)
+            await update.edit_message_text(text, parse_mode='Markdown')
+        else:
+            temp_template = session.get('temp_template', {})
+            if MessageTemplate.create_template(template_name, temp_template):
+                text = get_text('template_saved', lang, name=template_name)
+                await update.edit_message_text(text)
+                
+                # Limpar template temporário
+                user_sessions.update_session(user_id, {
+                    'temp_template': None,
+                    'state': 'authenticated'
+                })
+                
+                # Voltar ao menu
+                await asyncio.sleep(2)
+                await BotHandlers._show_upload_prompt(update, context, lang)
+            else:
+                text = get_text('error_general', lang)
+                await update.edit_message_text(text)
+    
+    @staticmethod
+    async def _handle_template_preview(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Mostra preview do template"""
+        user_id = str(update.effective_user.id)
+        session = user_sessions.get_session(user_id)
+        lang = session.get('language', 'pt-BR')
+        
+        temp_template = session.get('temp_template', {})
+        
+        preview_text = temp_template.get('text', 'Sem texto')
+        if temp_template.get('photo'):
+            preview_text = f"🖼️ [Foto incluída]\n\n{preview_text}"
+        
+        if temp_template.get('buttons'):
+            preview_text += "\n\n🔘 Botões:"
+            for button in temp_template['buttons']:
+                preview_text += f"\n• {button.get('text', '')} → {button.get('url', '')}"
+        
+        text = get_text('template_preview', lang, preview=preview_text)
+        keyboard = MessageBuilder.create_edit_keyboard()
+        
+        await update.edit_message_text(text, reply_markup=keyboard, parse_mode='Markdown')
+    
+    # ==================== SISTEMA DE LOOP INFINITO ====================
+    
+    @staticmethod
+    async def _show_loop_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str):
+        """Mostra menu de configuração de loop"""
+        user_id = str(update.effective_user.id)
+        
+        text = get_text('loop_menu', lang)
+        keyboard = LoopManager.create_loop_keyboard()
+        
+        if hasattr(update, 'message') and update.message:
+            await update.message.reply_text(text, reply_markup=keyboard, parse_mode='Markdown')
+        else:
+            await update.edit_message_text(text, reply_markup=keyboard, parse_mode='Markdown')
+    
+    @staticmethod
+    async def _handle_loop_enable(query, context: ContextTypes.DEFAULT_TYPE):
+        """Ativa loop infinito"""
+        user_id = str(query.from_user.id)
+        session = user_sessions.get_session(user_id)
+        lang = session.get('language', 'pt-BR')
+        
+        # Verificar se há template selecionado
+        selected_template = session.get('selected_template')
+        if not selected_template:
+            await query.edit_message_text("❌ Selecione uma mensagem primeiro!")
+            await asyncio.sleep(2)
+            await BotHandlers._show_template_menu(query, context, lang)
+            return
+        
+        config = {
+            'enabled': True,
+            'template_name': selected_template,
+            'interval_minutes': session.get('interval_minutes', 60),
+            'messages_per_cycle': session.get('messages_per_cycle', 10)
+        }
+        
+        if LoopManager.save_loop_config(user_id, config):
+            text = get_text('loop_enabled', lang)
+            await query.edit_message_text(text)
+            
+            # Voltar ao menu
+            await asyncio.sleep(2)
+            await BotHandlers._show_upload_prompt(query, context, lang)
+        else:
+            text = get_text('error_general', lang)
+            await query.edit_message_text(text)
+    
+    @staticmethod
+    async def _handle_loop_disable(query, context: ContextTypes.DEFAULT_TYPE):
+        """Desativa loop infinito"""
+        user_id = str(query.from_user.id)
+        session = user_sessions.get_session(user_id)
+        lang = session.get('language', 'pt-BR')
+        
+        if LoopManager.disable_loop(user_id):
+            text = get_text('loop_disabled', lang)
+            await query.edit_message_text(text)
+            
+            # Voltar ao menu
+            await asyncio.sleep(2)
+            await BotHandlers._show_upload_prompt(query, context, lang)
+        else:
+            text = get_text('error_general', lang)
+            await query.edit_message_text(text)
+    
+    @staticmethod
+    async def _handle_loop_status(query, context: ContextTypes.DEFAULT_TYPE):
+        """Mostra status do loop"""
+        user_id = str(query.from_user.id)
+        session = user_sessions.get_session(user_id)
+        lang = session.get('language', 'pt-BR')
+        
+        config = LoopManager.load_loop_config(user_id)
+        if config:
+            status = "✅ Ativo" if config.get('enabled') else "❌ Inativo"
+            interval = config.get('interval_minutes', 60)
+            template = config.get('template_name', 'Nenhuma')
+            
+            text = get_text('loop_status', lang, 
+                          status=status, 
+                          interval=interval, 
+                          template=template)
+        else:
+            text = "📊 **Status do Loop:**\n\n❌ Nenhuma configuração encontrada"
+        
+        keyboard = LoopManager.create_loop_keyboard()
+        await query.edit_message_text(text, reply_markup=keyboard, parse_mode='Markdown')
+    
+    @staticmethod
+    async def _handle_loop_interval_config(query, context: ContextTypes.DEFAULT_TYPE):
+        """Configura intervalo do loop"""
+        user_id = str(query.from_user.id)
+        session = user_sessions.get_session(user_id)
+        lang = session.get('language', 'pt-BR')
+        
+        user_sessions.update_session(user_id, {'state': 'configuring_loop_interval'})
+        
+        text = get_text('loop_interval_prompt', lang)
+        await query.edit_message_text(text, parse_mode='Markdown')
+    
+    @staticmethod
+    async def _handle_template_edit_actions(query, context: ContextTypes.DEFAULT_TYPE, action: str):
+        """Lida com ações de edição de template"""
+        if action == 'edit_text':
+            await BotHandlers._handle_template_text_edit(query, context)
+        elif action == 'edit_photo':
+            await BotHandlers._handle_template_photo_edit(query, context)
+        elif action == 'edit_buttons':
+            await BotHandlers._handle_template_button_edit(query, context)
+        elif action == 'preview_template':
+            await BotHandlers._handle_template_preview(query, context)
+        elif action == 'save_template':
+            await BotHandlers._handle_template_save(query, context)
+    
+    @staticmethod
+    async def _handle_template_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE, session: Dict, lang: str):
+        """Processa input de texto do template"""
+        user_id = str(update.effective_user.id)
+        text = update.message.text.strip()
+        
+        # Atualizar template temporário
+        temp_template = session.get('temp_template', {})
+        temp_template['text'] = text
+        
+        user_sessions.update_session(user_id, {
+            'temp_template': temp_template,
+            'state': 'creating_template'
+        })
+        
+        # Mostrar preview e opções de edição
+        await BotHandlers._handle_template_preview(update, context)
+    
+    @staticmethod
+    async def _handle_template_button_input(update: Update, context: ContextTypes.DEFAULT_TYPE, session: Dict, lang: str):
+        """Processa input de botões do template"""
+        user_id = str(update.effective_user.id)
+        text = update.message.text.strip()
+        
+        # Parse do formato: "Texto do Botão | https://link.com"
+        if '|' in text:
+            button_text, button_url = text.split('|', 1)
+            button_text = button_text.strip()
+            button_url = button_url.strip()
+            
+            # Atualizar template temporário
+            temp_template = session.get('temp_template', {})
+            if 'buttons' not in temp_template:
+                temp_template['buttons'] = []
+            
+            temp_template['buttons'].append({
+                'text': button_text,
+                'url': button_url
+            })
+            
+            user_sessions.update_session(user_id, {
+                'temp_template': temp_template,
+                'state': 'creating_template'
+            })
+            
+            # Mostrar preview
+            await BotHandlers._handle_template_preview(update, context)
+        else:
+            await update.message.reply_text(
+                "❌ Formato inválido. Use: `Texto do Botão | https://link.com`",
+                parse_mode='Markdown'
+            )
+    
+    @staticmethod
+    async def _handle_template_name_input(update: Update, context: ContextTypes.DEFAULT_TYPE, session: Dict, lang: str):
+        """Processa input do nome do template"""
+        template_name = update.message.text.strip()
+        await BotHandlers._handle_template_save(update, context, template_name)
+    
+    @staticmethod
+    async def _handle_loop_interval_input(update: Update, context: ContextTypes.DEFAULT_TYPE, session: Dict, lang: str):
+        """Processa input do intervalo do loop"""
+        user_id = str(update.effective_user.id)
+        text = update.message.text.strip()
+        
+        if validate_number(text):
+            interval = int(text)
+            if interval > 0:
+                # Salvar configuração
+                config = LoopManager.load_loop_config(user_id) or {}
+                config['interval_minutes'] = interval
+                
+                if LoopManager.save_loop_config(user_id, config):
+                    user_sessions.update_session(user_id, {
+                        'interval_minutes': interval,
+                        'state': 'authenticated'
+                    })
+                    
+                    await update.message.reply_text(
+                        f"✅ Intervalo configurado para {interval} minutos!"
+                    )
+                    
+                    # Voltar ao menu de loop
+                    await asyncio.sleep(2)
+                    await BotHandlers._show_loop_menu(update, context, lang)
+                else:
+                    await update.message.reply_text(get_text('error_general', lang))
+            else:
+                await update.message.reply_text("❌ O intervalo deve ser maior que 0.")
+        else:
+            await update.message.reply_text(get_text('error_invalid_number', lang))
+    
+    @staticmethod
+    async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handler para fotos (templates)"""
+        user_id = str(update.effective_user.id)
+        session = user_sessions.get_session(user_id)
+        lang = session.get('language', 'pt-BR')
+        state = session.get('state', '')
+        
+        if state == 'editing_template_photo':
+            # Salvar foto no template temporário
+            photo = update.message.photo[-1]  # Maior resolução
+            file_id = photo.file_id
+            
+            temp_template = session.get('temp_template', {})
+            temp_template['photo'] = file_id
+            
+            user_sessions.update_session(user_id, {
+                'temp_template': temp_template,
+                'state': 'creating_template'
+            })
+            
+            await update.message.reply_text("✅ Foto adicionada ao template!")
+            
+            # Mostrar preview
+            await asyncio.sleep(1)
+            await BotHandlers._handle_template_preview(update, context)
+        else:
+            await update.message.reply_text("❌ Envie uma foto apenas durante a criação de templates.")
+    
+    @staticmethod
+    async def _show_template_selection(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str):
+        """Mostra seleção de template para usar no envio"""
+        templates = MessageTemplate.list_templates()
+        
+        text = get_text('template_selection_prompt', lang)
+        keyboard = []
+        
+        # Adicionar templates disponíveis
+        for template_name in templates:
+            keyboard.append([InlineKeyboardButton(
+                f"📝 {template_name}",
+                callback_data=f"select_template_{template_name}"
+            )])
+        
+        # Opção para não usar template
+        keyboard.append([InlineKeyboardButton(
+            get_text('no_template', lang),
+            callback_data="no_template"
+        )])
+        
+        # Botão para criar novo template
+        keyboard.append([InlineKeyboardButton(
+            get_text('create_new_template', lang),
+            callback_data="create_new_template"
+        )])
+        
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await update.message.reply_text(text, reply_markup=reply_markup)
+    
+    @staticmethod
+    async def _handle_template_selection(query, context: ContextTypes.DEFAULT_TYPE, template_name: str):
+        """Processa seleção de template"""
+        user_id = str(query.from_user.id)
+        session = user_sessions.get_session(user_id)
+        lang = session.get('language', 'pt-BR')
+        
+        # Salvar template selecionado
+        user_sessions.update_session(user_id, {
+            'selected_template': template_name
+        })
+        
+        text = get_text('template_selected', lang, name=template_name)
+        await query.edit_message_text(text)
+        
+        # Ir para configuração de intervalo
+        await asyncio.sleep(2)
+        await BotHandlers._show_config_interval(query, context, lang)
+    
+    @staticmethod
+    async def _handle_no_template_selection(query, context: ContextTypes.DEFAULT_TYPE):
+        """Processa escolha de não usar template"""
+        user_id = str(query.from_user.id)
+        session = user_sessions.get_session(user_id)
+        lang = session.get('language', 'pt-BR')
+        
+        # Limpar template selecionado
+        user_sessions.update_session(user_id, {
+            'selected_template': None
+        })
+        
+        text = get_text('no_template_selected', lang)
+        await query.edit_message_text(text)
+        
+        # Ir para configuração de intervalo
+        await asyncio.sleep(2)
+        await BotHandlers._show_config_interval(query, context, lang)

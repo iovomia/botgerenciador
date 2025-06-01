@@ -63,6 +63,32 @@ TRANSLATIONS = {
         'status_processing': '⏳ Processando...',
         'status_waiting': '⏳ Aguardando próximo ciclo...',
         'status_queue_empty': '📭 Fila vazia. Envie uma nova planilha.',
+        
+        # Sistema de Templates de Mensagem
+        'template_menu': '📝 **Gerenciar Mensagens**\n\nEscolha uma opção:',
+        'create_template': '➕ **Criar Nova Mensagem**\n\nVamos criar uma mensagem personalizada!',
+        'edit_template': '✏️ **Editar Mensagem: {name}**\n\nEscolha o que deseja editar:',
+        'template_text_prompt': '📝 **Editar Texto**\n\nEnvie o texto da mensagem:',
+        'template_photo_prompt': '🖼️ **Adicionar Foto**\n\nEnvie a foto que deseja incluir na mensagem:',
+        'template_button_prompt': '🔘 **Adicionar Botão**\n\nEnvie no formato:\n`Texto do Botão | https://link.com`',
+        'template_name_prompt': '💾 **Salvar Mensagem**\n\nDigite um nome para esta mensagem:',
+        'template_saved': '✅ Mensagem "{name}" salva com sucesso!',
+        'template_deleted': '🗑️ Mensagem "{name}" removida com sucesso!',
+        'template_preview': '👁️ **Visualização da Mensagem:**\n\n{preview}',
+        'template_selected': '✅ Mensagem "{name}" selecionada para envio!',
+        'no_templates': '📝 Nenhuma mensagem salva ainda.\n\nCrie sua primeira mensagem!',
+        'template_selection_prompt': '📝 Escolha uma mensagem para usar no envio:',
+        'no_template': '📄 Usar mensagens da planilha',
+        'no_template_selected': '✅ Usando mensagens da planilha!',
+        
+        # Sistema de Loop Infinito
+        'loop_menu': '🔄 **Loop Infinito**\n\nConfiguração de envio contínuo:',
+        'loop_enabled': '✅ Loop infinito ativado!\n\nAs mensagens serão enviadas continuamente.',
+        'loop_disabled': '⏹️ Loop infinito desativado.',
+        'loop_interval_prompt': '⚙️ **Configurar Intervalo**\n\nDigite o intervalo em minutos entre cada reinício:',
+        'loop_status': '📊 **Status do Loop:**\n\n🔄 Ativo: {status}\n⏱️ Intervalo: {interval} min\n📝 Mensagem: {template}',
+        'loop_restart': '🔄 Reiniciando envio automático...',
+        'loop_finished_restart': '✅ Fila finalizada! Reiniciando em {interval} minutos...',
     },
     
     'en-US': {
@@ -124,6 +150,32 @@ TRANSLATIONS = {
         'status_processing': '⏳ Processing...',
         'status_waiting': '⏳ Waiting for next cycle...',
         'status_queue_empty': '📭 Queue empty. Send a new spreadsheet.',
+        
+        # Message Templates
+        'template_menu': '📝 **Manage Messages**\n\nChoose an option:',
+        'create_template': '➕ **Create New Message**\n\nLet\'s create a custom message!',
+        'edit_template': '✏️ **Edit Message: {name}**\n\nChoose what to edit:',
+        'template_text_prompt': '📝 **Edit Text**\n\nSend the message text:',
+        'template_photo_prompt': '🖼️ **Add Photo**\n\nSend the photo to include in the message:',
+        'template_button_prompt': '🔘 **Add Button**\n\nSend in format:\n`Button Text | https://link.com`',
+        'template_name_prompt': '💾 **Save Message**\n\nEnter a name for this message:',
+        'template_saved': '✅ Message "{name}" saved successfully!',
+        'template_deleted': '🗑️ Message "{name}" removed successfully!',
+        'template_preview': '👁️ **Message Preview:**\n\n{preview}',
+        'template_selected': '✅ Message "{name}" selected for sending!',
+        'no_templates': '📝 No saved messages yet.\n\nCreate your first message!',
+        'template_selection_prompt': '📝 Choose a message to use for sending:',
+        'no_template': '📄 Use spreadsheet messages',
+        'no_template_selected': '✅ Using spreadsheet messages!',
+        
+        # Infinite Loop System
+        'loop_menu': '🔄 **Infinite Loop**\n\nContinuous sending configuration:',
+        'loop_enabled': '✅ Infinite loop activated!\n\nMessages will be sent continuously.',
+        'loop_disabled': '⏹️ Infinite loop disabled.',
+        'loop_interval_prompt': '⚙️ **Configure Interval**\n\nEnter interval in minutes between each restart:',
+        'loop_status': '📊 **Loop Status:**\n\n🔄 Active: {status}\n⏱️ Interval: {interval} min\n📝 Message: {template}',
+        'loop_restart': '🔄 Restarting automatic sending...',
+        'loop_finished_restart': '✅ Queue finished! Restarting in {interval} minutes...',
     },
     
     'zh-CN': {
@@ -185,6 +237,32 @@ TRANSLATIONS = {
         'status_processing': '⏳ 处理中...',
         'status_waiting': '⏳ 等待下一个周期...',
         'status_queue_empty': '📭 队列为空。发送新的电子表格。',
+        
+        # 消息模板系统
+        'template_menu': '📝 **管理消息**\n\n选择一个选项：',
+        'create_template': '➕ **创建新消息**\n\n让我们创建一个自定义消息！',
+        'edit_template': '✏️ **编辑消息：{name}**\n\n选择要编辑的内容：',
+        'template_text_prompt': '📝 **编辑文本**\n\n发送消息文本：',
+        'template_photo_prompt': '🖼️ **添加照片**\n\n发送要包含在消息中的照片：',
+        'template_button_prompt': '🔘 **添加按钮**\n\n按格式发送：\n`按钮文本 | https://link.com`',
+        'template_name_prompt': '💾 **保存消息**\n\n为此消息输入名称：',
+        'template_saved': '✅ 消息"{name}"保存成功！',
+        'template_deleted': '🗑️ 消息"{name}"删除成功！',
+        'template_preview': '👁️ **消息预览：**\n\n{preview}',
+        'template_selected': '✅ 消息"{name}"已选择发送！',
+        'no_templates': '📝 还没有保存的消息。\n\n创建您的第一条消息！',
+        'template_selection_prompt': '📝 选择要用于发送的消息：',
+        'no_template': '📄 使用电子表格消息',
+        'no_template_selected': '✅ 使用电子表格消息！',
+        
+        # 无限循环系统
+        'loop_menu': '🔄 **无限循环**\n\n连续发送配置：',
+        'loop_enabled': '✅ 无限循环已激活！\n\n消息将连续发送。',
+        'loop_disabled': '⏹️ 无限循环已禁用。',
+        'loop_interval_prompt': '⚙️ **配置间隔**\n\n输入每次重启之间的间隔（分钟）：',
+        'loop_status': '📊 **循环状态：**\n\n🔄 活动：{status}\n⏱️ 间隔：{interval} 分钟\n📝 消息：{template}',
+        'loop_restart': '🔄 重启自动发送...',
+        'loop_finished_restart': '✅ 队列完成！{interval} 分钟后重启...',
     }
 }
 

@@ -65,6 +65,12 @@ def main():
         BotHandlers.handle_document
     ))
     
+    # Handler para fotos (templates)
+    application.add_handler(MessageHandler(
+        filters.PHOTO,
+        BotHandlers.handle_photo
+    ))
+    
     # Handler para botões inline
     application.add_handler(CallbackQueryHandler(BotHandlers.handle_callback_query))
     
@@ -78,6 +84,10 @@ def main():
     logger.info("   ✅ Tratamento de erros com skip")
     logger.info("   ✅ Interface multilíngue (PT/EN/ZH)")
     logger.info("   ✅ Relatórios detalhados")
+    logger.info("   🆕 Sistema de templates de mensagem")
+    logger.info("   🆕 Editor de fotos/texto/botões")
+    logger.info("   🆕 Loop infinito configurável")
+    logger.info("   🆕 Salvamento e seleção de mensagens")
     logger.info("   ✅ Navegação com botões interativos")
     
     # Executar bot
