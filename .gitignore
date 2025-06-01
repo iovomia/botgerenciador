@@ -13,9 +13,12 @@ temp_*
 
 # Relatórios gerados
 reports/
-*.csv
+relatorio_*.csv
 *.xlsx
 *.xls
+
+# Manter arquivo de exemplo
+!example_spreadsheet.csv
 
 # Cache Python
 __pycache__/
